@@ -1,0 +1,567 @@
+<!doctype html>
+<!--
+  Agora - single-file SPA prototype
+  Features:
+    - Tailwind CSS (CDN) and Lucide icons
+    - Feed with composer, like button + counters, persisted in localStorage
+    - Profile editor (name, bio) and avatar upload saved as Base64 in localStorage
+    - Simple Chats view (local messages per chat), persisted in localStorage
+    - SPA navigation: Feed / Profile / Chats without reload
+    - Everything in this single file for easy deployment
+
+  LocalStorage keys used:
+    - agora_posts -> JSON array of posts {id, text, likes, timestamp}
+    - agora_profile -> {name, bio, avatar} where avatar is Base64 data URL
+    - agora_chats -> array of chat objects {id, name, messages: [{from, text, ts}]}
+
+  JS functions are commented where they handle storage and rendering.
+-->
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <title>Agora — Prototype</title>
+
+    <!-- Tailwind CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Lucide icons -->
+    <script src="https://unpkg.com/lucide@latest/dist/lucide.min.js"></script>
+
+    <style>
+      /* tiny helpers */
+      .avatar-placeholder { width:44px; height:44px; display:inline-flex; align-items:center; justify-content:center; border-radius:9999px; }
+      .card { border: 1px solid #e6e9ee; background: white; }
+    </style>
+  </head>
+  <body class="bg-white text-slate-800 min-h-screen">
+
+    <div class="max-w-6xl mx-auto p-4">
+
+      <!-- Layout: sidebar on md+, single column on mobile -->
+      <div class="grid grid-cols-1 md:grid-cols-3 gap-6">
+
+        <!-- SIDEBAR (desktop) -->
+        <aside class="hidden md:block md:col-span-1">
+          <div class="card rounded-lg p-4">
+            <div class="flex items-center gap-3 mb-4">
+              <div id="sidebarAvatar" class="avatar-placeholder bg-slate-100 text-indigo-600 font-bold">A</div>
+              <div>
+                <div class="text-lg font-semibold">Agora</div>
+                <div id="sidebarName" class="text-xs text-slate-500">Your space to share</div>
+              </div>
+            </div>
+
+            <!-- Nav -->
+            <nav class="space-y-2 text-sm">
+              <button data-route="feed" class="routeBtn w-full text-left flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50">
+                <svg data-lucide="layout" class="w-4 h-4 text-slate-600"></svg>
+                Feed
+              </button>
+              <button data-route="profile" class="routeBtn w-full text-left flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50">
+                <svg data-lucide="user" class="w-4 h-4 text-slate-600"></svg>
+                Profile
+              </button>
+              <button data-route="chats" class="routeBtn w-full text-left flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50">
+                <svg data-lucide="message-circle" class="w-4 h-4 text-slate-600"></svg>
+                Chats
+              </button>
+            </nav>
+          </div>
+        </aside>
+
+        <!-- MAIN area (center) -->
+        <main class="md:col-span-1 md:col-start-2">
+
+          <!-- Top mobile nav (visible on small screens) -->
+          <div class="md:hidden mb-4 flex justify-between items-center">
+            <div class="flex items-center gap-3">
+              <div id="mobileAvatar" class="avatar-placeholder bg-slate-100 text-indigo-600 font-bold">A</div>
+              <div class="font-semibold">Agora</div>
+            </div>
+            <div class="flex gap-2">
+              <button data-route="feed" class="routeBtn p-2 rounded hover:bg-slate-50"><svg data-lucide="layout" class="w-5 h-5"></svg></button>
+              <button data-route="chats" class="routeBtn p-2 rounded hover:bg-slate-50"><svg data-lucide="message-circle" class="w-5 h-5"></svg></button>
+              <button data-route="profile" class="routeBtn p-2 rounded hover:bg-slate-50"><svg data-lucide="user" class="w-5 h-5"></svg></button>
+            </div>
+          </div>
+
+          <!-- FEED VIEW -->
+          <section id="view-feed" class="view">
+            <div class="card rounded-lg p-4 mb-4">
+              <!-- Composer -->
+              <div class="text-sm text-slate-500 mb-2">What's happening?</div>
+              <textarea id="postText" rows="3" class="w-full resize-none rounded-md border border-slate-200 p-3 focus:outline-none focus:ring-2 focus:ring-indigo-200" placeholder="Share something to Agora..."></textarea>
+              <div class="mt-3 flex items-center justify-between">
+                <div class="text-xs text-slate-400">Press Ctrl+Enter to post</div>
+                <div>
+                  <button id="postBtn" class="inline-flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded hover:bg-indigo-700">
+                    <svg data-lucide="plus" class="w-4 h-4"></svg>
+                    Post
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Feed list -->
+            <div id="feed" class="space-y-4">
+              <!-- posts will be rendered here by renderPosts() -->
+            </div>
+          </section>
+
+          <!-- PROFILE VIEW -->
+          <section id="view-profile" class="view hidden">
+            <div class="card rounded-lg p-4 mb-4">
+              <div class="flex items-center gap-4">
+                <div id="profileAvatarPreview" class="avatar-placeholder bg-slate-100 text-slate-700">YOU</div>
+                <div class="flex-1">
+                  <div class="flex items-center justify-between">
+                    <div>
+                      <div class="text-lg font-semibold" id="profileNamePreview">Your Name</div>
+                      <div class="text-sm text-slate-500" id="profileBioPreview">Short bio goes here.</div>
+                    </div>
+                    <button id="editProfileBtn" class="text-sm text-indigo-600">Edit</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Edit form -->
+            <div id="profileEditor" class="card rounded-lg p-4">
+              <div class="mb-3">
+                <label class="block text-xs text-slate-600 mb-1">Name</label>
+                <input id="profileName" class="w-full rounded border border-slate-200 p-2" />
+              </div>
+              <div class="mb-3">
+                <label class="block text-xs text-slate-600 mb-1">Bio</label>
+                <textarea id="profileBio" rows="3" class="w-full rounded border border-slate-200 p-2"></textarea>
+              </div>
+              <div class="mb-3">
+                <label class="block text-xs text-slate-600 mb-1">Avatar</label>
+                <input id="profileAvatar" type="file" accept="image/*" />
+              </div>
+              <div class="flex justify-end gap-2">
+                <button id="saveProfileBtn" class="px-4 py-2 rounded border border-slate-200">Save</button>
+              </div>
+            </div>
+          </section>
+
+          <!-- CHATS VIEW -->
+          <section id="view-chats" class="view hidden">
+            <div class="card rounded-lg p-4 mb-4">
+              <div class="font-semibold mb-2">Messages</div>
+              <div id="chatsList" class="space-y-3">
+                <!-- chat items rendered here -->
+              </div>
+            </div>
+
+            <!-- chat window -->
+            <div id="chatWindow" class="card rounded-lg p-4 hidden">
+              <div class="flex items-center justify-between mb-3">
+                <div class="flex items-center gap-3">
+                  <div id="chatWindowAvatar" class="avatar-placeholder bg-slate-100 text-slate-700">C</div>
+                  <div id="chatWindowTitle" class="font-semibold">Chat</div>
+                </div>
+                <button id="closeChatBtn" class="text-sm text-slate-500">Close</button>
+              </div>
+              <div id="chatMessages" class="space-y-2 mb-3 max-h-64 overflow-auto"></div>
+              <div class="flex gap-2">
+                <input id="chatInput" class="flex-1 rounded border border-slate-200 p-2" placeholder="Write a message..." />
+                <button id="sendChatBtn" class="bg-indigo-600 text-white px-3 py-2 rounded">Send</button>
+              </div>
+            </div>
+          </section>
+
+        </main>
+
+        <!-- RIGHT PANEL (desktop only) -->
+        <aside class="hidden md:block md:col-span-1">
+          <div class="card rounded-lg p-4">
+            <div class="font-semibold mb-2">Who to follow</div>
+            <ul class="space-y-3 text-sm text-slate-700">
+              <li class="flex items-center justify-between">
+                <div class="flex items-center gap-3">
+                  <div class="avatar-placeholder bg-slate-100 text-slate-700">MB</div>
+                  <div>
+                    <div class="font-medium">Mark Baker</div>
+                    <div class="text-xs text-slate-500">Sculptor</div>
+                  </div>
+                </div>
+                <button class="text-sm text-indigo-600">Follow</button>
+              </li>
+            </ul>
+
+            <div class="mt-4">
+              <div class="font-semibold mb-2">Trending</div>
+              <ol class="list-decimal list-inside text-sm text-slate-600 space-y-1">
+                <li>#GlassArt</li>
+                <li>#Minimal</li>
+                <li>#StudioSale</li>
+              </ol>
+            </div>
+          </div>
+        </aside>
+
+      </div>
+    </div>
+
+    <!-- Supabase SDK and app logic -->
+    <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
+    <script>
+      // Replace with your Supabase values below
+      const SUPABASE_CONFIG = {
+        url: 'https://YOUR_SUPABASE_URL',
+        key: 'YOUR_SUPABASE_ANON_KEY'
+      };
+
+      // Initialize Supabase client
+      const supabase = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
+
+      // Ensure Lucide icons are rendered
+      if (window.lucide) lucide.replace();
+
+      /* ---------- Auth UI: show if not signed in ---------- */
+      // Create a simple overlay for login/signup
+      const authOverlay = document.createElement('div');
+      authOverlay.id = 'authOverlay';
+      authOverlay.style = 'position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:rgba(255,255,255,0.9);z-index:60;';
+      authOverlay.innerHTML = `
+        <div class="w-full max-w-md p-6 bg-white rounded-lg shadow">
+          <h3 class="text-lg font-semibold mb-3">Sign in to Agora</h3>
+          <div class="mb-2">
+            <input id="authEmail" type="email" placeholder="Email" class="w-full p-2 border rounded" />
+          </div>
+          <div class="mb-3">
+            <input id="authPassword" type="password" placeholder="Password" class="w-full p-2 border rounded" />
+          </div>
+          <div class="flex gap-2 justify-end">
+            <button id="signupBtn" class="px-3 py-2 rounded border">Sign up</button>
+            <button id="signinBtn" class="px-3 py-2 bg-indigo-600 text-white rounded">Sign in</button>
+          </div>
+          <div class="text-xs text-slate-500 mt-3">Uses Supabase Auth (email/password)</div>
+        </div>`;
+      document.body.appendChild(authOverlay);
+
+      // Auth elements
+      const authEmail = document.getElementById('authEmail');
+      const authPassword = document.getElementById('authPassword');
+      const signinBtn = document.getElementById('signinBtn');
+      const signupBtn = document.getElementById('signupBtn');
+
+      // Simple helper to show/hide overlay
+      function showAuth(show){ authOverlay.style.display = show ? 'flex' : 'none'; }
+
+      // Auth actions
+      signupBtn.addEventListener('click', async () => {
+        const email = authEmail.value.trim();
+        const password = authPassword.value.trim();
+        if (!email || !password) return alert('Enter email and password');
+        const { data, error } = await supabase.auth.signUp({ email, password });
+        if (error) return alert(error.message);
+        alert('Check your email to confirm sign up (if enabled). Signing you in...');
+      });
+
+      signinBtn.addEventListener('click', async () => {
+        const email = authEmail.value.trim();
+        const password = authPassword.value.trim();
+        if (!email || !password) return alert('Enter email and password');
+        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        if (error) return alert(error.message);
+        // onAuthChange will handle UI
+      });
+
+      // Logout button in sidebar
+      const logoutBtn = document.createElement('button');
+      logoutBtn.textContent = 'Logout';
+      logoutBtn.className = 'w-full text-left flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 mt-3 text-sm text-red-600';
+      logoutBtn.addEventListener('click', async () => { await supabase.auth.signOut(); alert('Signed out'); });
+      // append to sidebar card
+      const sidebarCard = document.querySelector('aside > .card');
+      if (sidebarCard) sidebarCard.appendChild(logoutBtn);
+
+      /* ---------- Supabase-backed API wrappers ---------- */
+      async function getSession() { const { data } = await supabase.auth.getSession(); return data.session; }
+      async function getUser() { const s = await getSession(); return s ? s.user : null; }
+
+      // Posts: fetch posts with profile relation (assumes profiles table has a foreign key)
+      async function loadPostsSupabase(){
+        const { data, error } = await supabase
+          .from('posts')
+          .select('id, text, created_at, user_id, likes_count, profiles(username, avatar_url)')
+          .order('created_at', { ascending: false });
+        if (error) { console.error(error); return []; }
+        return data || [];
+      }
+
+      async function createPostSupabase(text){
+        const user = await getUser();
+        if (!user) throw new Error('Not authenticated');
+        const { data, error } = await supabase.from('posts').insert({ text, user_id: user.id, likes_count: 0 }).select();
+        if (error) throw error;
+        return data[0];
+      }
+
+      async function updatePostLikes(id, newCount){
+        const { error } = await supabase.from('posts').update({ likes_count: newCount }).eq('id', id);
+        if (error) console.error(error);
+      }
+
+      // Profiles: load or create profile for user
+      async function loadProfileSupabase(){
+        const user = await getUser();
+        if (!user) return { username: 'Guest', bio: '', avatar_url: null };
+        const { data, error } = await supabase.from('profiles').select('id, username, bio, avatar_url').eq('id', user.id).single();
+        if (error && error.code === 'PGRST116') { return { username: user.email.split('@')[0], bio: '', avatar_url: null }; }
+        if (error && error.message && error.message.includes('Results contain 0 rows')) return { username: user.email.split('@')[0], bio: '', avatar_url: null };
+        return data || { username: user.email.split('@')[0], bio: '', avatar_url: null };
+      }
+
+      async function saveProfileSupabase(profile){
+        const user = await getUser();
+        if (!user) throw new Error('Not authenticated');
+        // upsert profile (id is user id)
+        const payload = { id: user.id, username: profile.username, bio: profile.bio, avatar_url: profile.avatar_url };
+        const { error } = await supabase.from('profiles').upsert(payload);
+        if (error) console.error(error);
+      }
+
+      // Storage: upload avatar to 'avatars' bucket and return public URL
+      async function uploadAvatar(file){
+        const user = await getUser();
+        if (!user) throw new Error('Not authenticated');
+        const path = `${user.id}/${Date.now()}_${file.name}`;
+        const { data, error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+        if (error) throw error;
+        const { publicUrl } = supabase.storage.from('avatars').getPublicUrl(path);
+        return publicUrl;
+      }
+
+      /* ---------- Realtime: subscribe to posts INSERT/UPDATE ---------- */
+      let postsChannel = null;
+      function subscribePostsRealtime(onInsert, onUpdate){
+        if (!supabase) return;
+        if (postsChannel) postsChannel.unsubscribe();
+        postsChannel = supabase.channel('public:posts')
+          .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => onInsert && onInsert(payload.new))
+          .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, payload => onUpdate && onUpdate(payload.new))
+          .subscribe();
+      }
+
+      /* ---------- Rendering (uses Supabase data) ---------- */
+      const feedEl = document.getElementById('feed');
+      const composer = document.getElementById('postText');
+
+      function escapeHtml(s){ return String(s).replace(/[&<>\"]+/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+      function timeAgo(ts){ const diff = Math.floor((Date.now()-new Date(ts))/1000); if (diff<60) return `${diff}s`; if (diff<3600) return `${Math.floor(diff/60)}m`; if (diff<86400) return `${Math.floor(diff/3600)}h`; return `${Math.floor(diff/86400)}d`; }
+
+      async function renderPosts(){
+        const posts = await loadPostsSupabase();
+        feedEl.innerHTML = '';
+        posts.forEach(p => {
+          const article = document.createElement('article');
+          article.className = 'border border-slate-200 rounded-lg p-4 card';
+          article.dataset.id = p.id;
+
+          const username = p.profiles?.username || (p.user_id ? p.user_id.slice(0,6) : 'Anon');
+          const avatarUrl = p.profiles?.avatar_url || null;
+
+          article.innerHTML = `
+            <div class="flex items-start gap-3">
+              <div class="avatar-placeholder bg-slate-100 text-slate-700" style="${avatarUrl?`background-image:url(${avatarUrl});background-size:cover;`:''}">${avatarUrl?'':username.slice(0,2).toUpperCase()}</div>
+              <div class="flex-1">
+                <div class="flex justify-between items-start">
+                  <div>
+                    <div class="font-semibold">${escapeHtml(username)}</div>
+                    <div class="text-xs text-slate-500">${timeAgo(p.created_at)}</div>
+                  </div>
+                </div>
+                <p class="mt-2 text-slate-700">${escapeHtml(p.text)}</p>
+                <div class="mt-3 flex gap-4 text-sm items-center">
+                  <button class="likeBtn flex items-center gap-1 text-slate-600" aria-pressed="false">
+                    <svg data-lucide="heart" class="w-4 h-4"></svg>
+                    <span class="likeCount">${p.likes_count||0}</span>
+                  </button>
+                  <button class="replyBtn flex items-center gap-1 text-slate-600">
+                    <svg data-lucide="message-square" class="w-4 h-4"></svg>
+                    <span>Reply</span>
+                  </button>
+                </div>
+              </div>
+            </div>`;
+
+          feedEl.appendChild(article);
+        });
+        if (window.lucide) lucide.replace();
+      }
+
+      /* ---------- Posting ---------- */
+      document.getElementById('postBtn').addEventListener('click', async () => {
+        try {
+          const user = await getUser();
+          if (!user) return alert('Please sign in to post.');
+          const text = composer.value.trim();
+          if (!text) return;
+          await createPostSupabase(text);
+          composer.value = '';
+        } catch (e) { console.error(e); alert('Post failed'); }
+      });
+      composer.addEventListener('keydown', (e) => { if (e.key === 'Enter' && (e.ctrlKey || e.metaKey)) document.getElementById('postBtn').click(); });
+
+      /* ---------- Like handling (updates likes_count) ---------- */
+      feedEl.addEventListener('click', async (e) => {
+        const likeBtn = e.target.closest('.likeBtn');
+        if (!likeBtn) return;
+        const article = likeBtn.closest('article');
+        const id = article && article.dataset.id;
+        if (!id) return;
+        // Get current count from DOM
+        const countEl = likeBtn.querySelector('.likeCount');
+        const current = parseInt(countEl.textContent || '0', 10);
+        const pressed = likeBtn.getAttribute('aria-pressed') === 'true';
+        const newCount = pressed ? Math.max(0, current-1) : current+1;
+        // Optimistic UI
+        countEl.textContent = newCount;
+        likeBtn.setAttribute('aria-pressed', (!pressed).toString());
+        likeBtn.classList.toggle('text-indigo-600');
+        // Persist
+        await updatePostLikes(id, newCount);
+      });
+
+      /* ---------- Profile handling (Supabase) ---------- */
+      async function renderProfilePreview(){
+        const p = await loadProfileSupabase();
+        document.getElementById('profileNamePreview').textContent = p.username || 'Your Name';
+        document.getElementById('profileBioPreview').textContent = p.bio || '';
+        const avatarNode = document.getElementById('profileAvatarPreview');
+        const sidebarAvatar = document.getElementById('sidebarAvatar');
+        const mobileAvatar = document.getElementById('mobileAvatar');
+        if (p.avatar_url){
+          avatarNode.style.backgroundImage = `url(${p.avatar_url})`;
+          avatarNode.style.backgroundSize = 'cover'; avatarNode.textContent = '';
+          sidebarAvatar.style.backgroundImage = `url(${p.avatar_url})`; sidebarAvatar.style.backgroundSize='cover'; sidebarAvatar.textContent='';
+          mobileAvatar.style.backgroundImage = `url(${p.avatar_url})`; mobileAvatar.style.backgroundSize='cover'; mobileAvatar.textContent='';
+        } else {
+          avatarNode.style.backgroundImage = ''; avatarNode.textContent = (p.username||'A').slice(0,2).toUpperCase();
+        }
+      }
+
+      document.getElementById('editProfileBtn').addEventListener('click', async () => {
+        const p = await loadProfileSupabase();
+        document.getElementById('profileName').value = p.username || '';
+        document.getElementById('profileBio').value = p.bio || '';
+        document.getElementById('profileEditor').scrollIntoView({ behavior: 'smooth' });
+      });
+
+      // Upload avatar to Supabase Storage and update profile
+      document.getElementById('profileAvatar').addEventListener('change', async (e) => {
+        const f = e.target.files && e.target.files[0];
+        if (!f) return;
+        try {
+          const publicUrl = await uploadAvatar(f);
+          const p = await loadProfileSupabase(); p.avatar_url = publicUrl; await saveProfileSupabase(p); await renderProfilePreview();
+          alert('Avatar uploaded');
+        } catch (err) { console.error(err); alert('Upload failed'); }
+      });
+
+      document.getElementById('saveProfileBtn').addEventListener('click', async () => {
+        const username = document.getElementById('profileName').value.trim() || 'Your Name';
+        const bio = document.getElementById('profileBio').value.trim() || '';
+        const p = await loadProfileSupabase(); p.username = username; p.bio = bio; await saveProfileSupabase(p); await renderProfilePreview(); alert('Profile saved');
+      });
+
+      /* ---------- Chats via Supabase messages table ---------- */
+      const chatsListEl = document.getElementById('chatsList');
+      const chatWindow = document.getElementById('chatWindow');
+      const chatMessagesEl = document.getElementById('chatMessages');
+      let activeChatId = null; // other user's id
+
+      async function loadChatsSupabase(){
+        const user = await getUser(); if (!user) return [];
+        // fetch messages where current user is sender or receiver
+        const { data, error } = await supabase.from('messages').select('id, sender_id, receiver_id, text, created_at').or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order('created_at', { ascending: false });
+        if (error) { console.error(error); return []; }
+        // Group by other participant
+        const groups = {};
+        data.forEach(m => {
+          const other = m.sender_id === user.id ? m.receiver_id : m.sender_id;
+          if (!groups[other]) groups[other] = [];
+          groups[other].push(m);
+        });
+        return Object.keys(groups).map(id => ({ id, messages: groups[id] }));
+      }
+
+      async function renderChatsList(){
+        const chats = await loadChatsSupabase();
+        chatsListEl.innerHTML = '';
+        chats.forEach(c => {
+          const el = document.createElement('div');
+          el.className = 'flex items-center justify-between p-2 rounded hover:bg-slate-50 cursor-pointer';
+          el.innerHTML = `<div class="flex items-center gap-3"><div class="avatar-placeholder bg-slate-100">${(c.id||'U')[0]}</div><div><div class="font-medium">${c.id}</div><div class="text-xs text-slate-500">${(c.messages[0]||{text:''}).text.slice(0,40)}</div></div></div>`;
+          el.addEventListener('click', () => openChat(c.id));
+          chatsListEl.appendChild(el);
+        });
+      }
+
+      async function openChat(otherId){
+        activeChatId = otherId; chatWindow.classList.remove('hidden'); document.getElementById('chatWindowTitle').textContent = otherId; document.getElementById('chatWindowAvatar').textContent = (otherId||'C')[0];
+        await renderChatMessagesSupabase(otherId);
+      }
+
+      async function renderChatMessagesSupabase(otherId){
+        const user = await getUser(); if (!user) return;
+        const { data, error } = await supabase.from('messages').select('id, sender_id, receiver_id, text, created_at').or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${user.id})`).order('created_at', { ascending: true });
+        if (error) { console.error(error); return; }
+        chatMessagesEl.innerHTML = '';
+        data.forEach(m => {
+          const el = document.createElement('div'); el.className = `p-2 rounded ${m.sender_id===user.id ? 'bg-indigo-50 self-end' : 'bg-slate-100'}`; el.textContent = m.text; chatMessagesEl.appendChild(el);
+        });
+        chatMessagesEl.scrollTop = chatMessagesEl.scrollHeight;
+      }
+
+      document.getElementById('sendChatBtn').addEventListener('click', async () => {
+        const text = document.getElementById('chatInput').value.trim(); if (!text || !activeChatId) return;
+        const user = await getUser(); if (!user) return alert('Sign in to send messages');
+        const { error } = await supabase.from('messages').insert({ sender_id: user.id, receiver_id: activeChatId, text });
+        if (error) { console.error(error); alert('Send failed'); return; }
+        document.getElementById('chatInput').value = '';
+        await renderChatMessagesSupabase(activeChatId);
+        await renderChatsList();
+      });
+
+      document.getElementById('closeChatBtn').addEventListener('click', ()=>{ chatWindow.classList.add('hidden'); activeChatId = null; });
+
+      /* ---------- SPA navigation ---------- */
+      const views = document.querySelectorAll('.view');
+      function showRoute(route){ views.forEach(v=>v.classList.add('hidden')); document.getElementById('view-'+route).classList.remove('hidden'); }
+      document.querySelectorAll('.routeBtn').forEach(btn => btn.addEventListener('click', (e)=>{ const route = btn.dataset.route; showRoute(route); }));
+
+      /* ---------- Auth state handling ---------- */
+      supabase.auth.onAuthStateChange(async (event, session) => {
+        const user = session?.user || null;
+        if (!user) {
+          showAuth(true);
+          // hide composer
+          document.getElementById('postText').disabled = true;
+        } else {
+          showAuth(false);
+          document.getElementById('postText').disabled = false;
+          // ensure profile exists
+          const p = await loadProfileSupabase();
+          if (!p || !p.username) await saveProfileSupabase({ username: user.email.split('@')[0], bio: '', avatar_url: null });
+          await renderProfilePreview();
+          await renderPosts();
+          await renderChatsList();
+          // subscribe realtime
+          subscribePostsRealtime(async (newPost)=>{ await renderPosts(); }, async (updated)=>{ await renderPosts(); });
+        }
+      });
+
+      // Kick off initial state check
+      (async function(){
+        const session = await getSession();
+        if (!session) { showAuth(true); document.getElementById('postText').disabled = true; }
+        else { showAuth(false); document.getElementById('postText').disabled = false; await renderProfilePreview(); await renderPosts(); await renderChatsList(); subscribePostsRealtime(async ()=>{ await renderPosts(); }, async ()=>{ await renderPosts(); }); }
+      })();
+
+    </script>
+  </body>
+</html>
