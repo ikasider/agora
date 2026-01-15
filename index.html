@@ -207,14 +207,24 @@
     <!-- Supabase SDK and app logic -->
     <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js"></script>
     <script>
-      // Replace with your Supabase values below
-      const SUPABASE_CONFIG = {
-        url: 'https://clwmpnozlzhwzcztmvvq.supabaseClient.co',
-        key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd21wbm96bHpod3pjenRtdnZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MDg3MDcsImV4cCI6MjA4NDA4NDcwN30.mEI3KwKEVexGXEpTYAt2KbhTR1F_mnFSsmDjbwC5nbc'
-      };
+        // Replace with your Supabase values below
+        const SUPABASE_CONFIG = {
+            url: 'https://clwmpnozlzhwzcztmvvq.supabaseClient.co',
+            key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd21wbm96bHpod3pjenRtdnZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MDg3MDcsImV4cCI6MjA4NDA4NDcwN30.mEI3KwKEVexGXEpTYAt2KbhTR1F_mnFSsmDjbwC5nbc'
+        };
 
-      // Initialize Supabase client
-      const supabaseClient = supabaseClient.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
+        // Initialize Supabase client
+        const supabaseClient = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
+
+        (async () => {
+            const { data, error } = await supabaseClient.from('posts').select('count');
+            if (error) {
+                console.error("Ошибка подключения к базе:", error.message);
+                alert("База данных не отвечает: " + error.message);
+            } else {
+                console.log("Связь с Supabase установлена!");
+            }
+        })();
 
       // Ensure Lucide icons are rendered
       if (window.lucide) lucide.replace();
