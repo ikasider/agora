@@ -209,12 +209,12 @@
     <script>
       // Replace with your Supabase values below
       const SUPABASE_CONFIG = {
-        url: 'https://clwmpnozlzhwzcztmvvq.supabase.co',
+        url: 'https://clwmpnozlzhwzcztmvvq.supabaseClient.co',
         key: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImNsd21wbm96bHpod3pjenRtdnZxIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MDg3MDcsImV4cCI6MjA4NDA4NDcwN30.mEI3KwKEVexGXEpTYAt2KbhTR1F_mnFSsmDjbwC5nbc'
       };
 
       // Initialize Supabase client
-      const supabase = supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
+      const supabaseClient = supabaseClient.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.key);
 
       // Ensure Lucide icons are rendered
       if (window.lucide) lucide.replace();
@@ -255,7 +255,7 @@
         const email = authEmail.value.trim();
         const password = authPassword.value.trim();
         if (!email || !password) return alert('Enter email and password');
-        const { data, error } = await supabase.auth.signUp({ email, password });
+        const { data, error } = await supabaseClient.auth.signUp({ email, password });
         if (error) return alert(error.message);
         alert('Check your email to confirm sign up (if enabled). Signing you in...');
       });
@@ -264,7 +264,7 @@
         const email = authEmail.value.trim();
         const password = authPassword.value.trim();
         if (!email || !password) return alert('Enter email and password');
-        const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+        const { data, error } = await supabaseClient.auth.signInWithPassword({ email, password });
         if (error) return alert(error.message);
         // onAuthChange will handle UI
       });
@@ -273,13 +273,13 @@
       const logoutBtn = document.createElement('button');
       logoutBtn.textContent = 'Logout';
       logoutBtn.className = 'w-full text-left flex items-center gap-2 px-3 py-2 rounded hover:bg-slate-50 mt-3 text-sm text-red-600';
-      logoutBtn.addEventListener('click', async () => { await supabase.auth.signOut(); alert('Signed out'); });
+      logoutBtn.addEventListener('click', async () => { await supabaseClient.auth.signOut(); alert('Signed out'); });
       // append to sidebar card
       const sidebarCard = document.querySelector('aside > .card');
       if (sidebarCard) sidebarCard.appendChild(logoutBtn);
 
       /* ---------- Supabase-backed API wrappers ---------- */
-      async function getSession() { const { data } = await supabase.auth.getSession(); return data.session; }
+      async function getSession() { const { data } = await supabaseClient.auth.getSession(); return data.session; }
       async function getUser() { const s = await getSession(); return s ? s.user : null; }
 
       // Posts: fetch posts with profile relation (assumes profiles table has a foreign key)
@@ -295,13 +295,19 @@
       async function createPostSupabase(text){
         const user = await getUser();
         if (!user) throw new Error('Not authenticated');
-        const { data, error } = await supabase.from('posts').insert({ text, user_id: user.id, likes_count: 0 }).select();
+        // Добавь .select() в конце, чтобы получить созданный пост обратно
+        const { data, error } = await supabaseClient.from('posts').insert({ 
+            text, 
+            user_id: user.id, 
+            likes_count: 0 
+        }).select(); 
+        
         if (error) throw error;
-        return data[0];
-      }
+        return data ? data[0] : null;
+        }
 
       async function updatePostLikes(id, newCount){
-        const { error } = await supabase.from('posts').update({ likes_count: newCount }).eq('id', id);
+        const { error } = await supabaseClient.from('posts').update({ likes_count: newCount }).eq('id', id);
         if (error) console.error(error);
       }
 
@@ -309,7 +315,7 @@
       async function loadProfileSupabase(){
         const user = await getUser();
         if (!user) return { username: 'Guest', bio: '', avatar_url: null };
-        const { data, error } = await supabase.from('profiles').select('id, username, bio, avatar_url').eq('id', user.id).single();
+        const { data, error } = await supabaseClient.from('profiles').select('id, username, bio, avatar_url').eq('id', user.id).single();
         if (error && error.code === 'PGRST116') { return { username: user.email.split('@')[0], bio: '', avatar_url: null }; }
         if (error && error.message && error.message.includes('Results contain 0 rows')) return { username: user.email.split('@')[0], bio: '', avatar_url: null };
         return data || { username: user.email.split('@')[0], bio: '', avatar_url: null };
@@ -320,7 +326,7 @@
         if (!user) throw new Error('Not authenticated');
         // upsert profile (id is user id)
         const payload = { id: user.id, username: profile.username, bio: profile.bio, avatar_url: profile.avatar_url };
-        const { error } = await supabase.from('profiles').upsert(payload);
+        const { error } = await supabaseClient.from('profiles').upsert(payload);
         if (error) console.error(error);
       }
 
@@ -329,9 +335,9 @@
         const user = await getUser();
         if (!user) throw new Error('Not authenticated');
         const path = `${user.id}/${Date.now()}_${file.name}`;
-        const { data, error } = await supabase.storage.from('avatars').upload(path, file, { upsert: true });
+        const { data, error } = await supabaseClient.storage.from('avatars').upload(path, file, { upsert: true });
         if (error) throw error;
-        const { publicUrl } = supabase.storage.from('avatars').getPublicUrl(path);
+        const { publicUrl } = supabaseClient.storage.from('avatars').getPublicUrl(path);
         return publicUrl;
       }
 
@@ -340,7 +346,7 @@
       function subscribePostsRealtime(onInsert, onUpdate){
         if (!supabase) return;
         if (postsChannel) postsChannel.unsubscribe();
-        postsChannel = supabase.channel('public:posts')
+        postsChannel = supabaseClient.channel('public:posts')
           .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'posts' }, payload => onInsert && onInsert(payload.new))
           .on('postgres_changes', { event: 'UPDATE', schema: 'public', table: 'posts' }, payload => onUpdate && onUpdate(payload.new))
           .subscribe();
@@ -477,7 +483,7 @@
       async function loadChatsSupabase(){
         const user = await getUser(); if (!user) return [];
         // fetch messages where current user is sender or receiver
-        const { data, error } = await supabase.from('messages').select('id, sender_id, receiver_id, text, created_at').or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order('created_at', { ascending: false });
+        const { data, error } = await supabaseClient.from('messages').select('id, sender_id, receiver_id, text, created_at').or(`sender_id.eq.${user.id},receiver_id.eq.${user.id}`).order('created_at', { ascending: false });
         if (error) { console.error(error); return []; }
         // Group by other participant
         const groups = {};
@@ -508,7 +514,7 @@
 
       async function renderChatMessagesSupabase(otherId){
         const user = await getUser(); if (!user) return;
-        const { data, error } = await supabase.from('messages').select('id, sender_id, receiver_id, text, created_at').or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${user.id})`).order('created_at', { ascending: true });
+        const { data, error } = await supabaseClient.from('messages').select('id, sender_id, receiver_id, text, created_at').or(`and(sender_id.eq.${user.id},receiver_id.eq.${otherId}),and(sender_id.eq.${otherId},receiver_id.eq.${user.id})`).order('created_at', { ascending: true });
         if (error) { console.error(error); return; }
         chatMessagesEl.innerHTML = '';
         data.forEach(m => {
@@ -520,7 +526,7 @@
       document.getElementById('sendChatBtn').addEventListener('click', async () => {
         const text = document.getElementById('chatInput').value.trim(); if (!text || !activeChatId) return;
         const user = await getUser(); if (!user) return alert('Sign in to send messages');
-        const { error } = await supabase.from('messages').insert({ sender_id: user.id, receiver_id: activeChatId, text });
+        const { error } = await supabaseClient.from('messages').insert({ sender_id: user.id, receiver_id: activeChatId, text });
         if (error) { console.error(error); alert('Send failed'); return; }
         document.getElementById('chatInput').value = '';
         await renderChatMessagesSupabase(activeChatId);
@@ -535,7 +541,7 @@
       document.querySelectorAll('.routeBtn').forEach(btn => btn.addEventListener('click', (e)=>{ const route = btn.dataset.route; showRoute(route); }));
 
       /* ---------- Auth state handling ---------- */
-      supabase.auth.onAuthStateChange(async (event, session) => {
+      supabaseClient.auth.onAuthStateChange(async (event, session) => {
         const user = session?.user || null;
         if (!user) {
           showAuth(true);
